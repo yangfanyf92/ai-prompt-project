@@ -57,21 +57,20 @@ function loadProjects() {
 }
 
 function loadSettings() {
+  const defaults = {
+    provider: import.meta.env.VITE_DEFAULT_PROVIDER || 'OpenAI Compatible',
+    endpoint: import.meta.env.VITE_DEFAULT_ENDPOINT || 'https://api.openai.com/v1/chat/completions',
+    model: import.meta.env.VITE_DEFAULT_MODEL || 'gpt-4o-mini',
+    apiKey: import.meta.env.VITE_DEFAULT_API_KEY || '',
+  }
+
   try {
     return {
-      provider: 'OpenAI Compatible',
-      endpoint: 'https://api.openai.com/v1/chat/completions',
-      model: 'gpt-4o-mini',
-      apiKey: '',
+      ...defaults,
       ...JSON.parse(localStorage.getItem(SETTINGS_KEY)),
     }
   } catch {
-    return {
-      provider: 'OpenAI Compatible',
-      endpoint: 'https://api.openai.com/v1/chat/completions',
-      model: 'gpt-4o-mini',
-      apiKey: '',
-    }
+    return defaults
   }
 }
 
