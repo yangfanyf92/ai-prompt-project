@@ -774,9 +774,13 @@ h2 {
 }
 
 .history-box {
-  flex: 1;
-  min-height: 220px;
+  flex: 1 1 360px;
+  display: flex;
+  flex-direction: column;
+  height: 360px;
+  min-height: 360px;
   padding: 16px;
+  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.05);
@@ -790,7 +794,25 @@ h2 {
 .history-list {
   display: grid;
   gap: 10px;
+  flex: 1;
+  min-height: 0;
   margin-top: 16px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.history-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.history-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.history-list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .history-list button {
