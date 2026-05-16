@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   FaChevronDown,
+  FaChevronLeft,
   FaChevronRight,
   FaCog,
   FaCopy,
   FaImage,
   FaPaperPlane,
   FaPlus,
-  FaRegTrashAlt,
   FaSearch,
 } from 'react-icons/fa'
 
@@ -317,9 +317,11 @@ export default function App() {
   const [notesOpen, setNotesOpen] = useState(true)
   const [uploadWarning, setUploadWarning] = useState('')
   const [storyboardTemplate, setStoryboardTemplate] = useState('default')
+  const [projectPanelCollapsed, setProjectPanelCollapsed] = useState(false)
   const fileInputRef = useRef(null)
   const chatRef = useRef(null)
   const inputRef = useRef(null)
+  const mentionMenuRef = useRef(null)
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeId) || projects[0],
@@ -327,6 +329,15 @@ export default function App() {
   )
   const activeProvider = settings.providers[settings.activeProviderId] || settings.providers.openai
   const activePreset = PROVIDERS[activeProvider.providerId] || PROVIDERS.custom
+  const apiStatus = !activeProvider.apiKey
+    ? { className: 'offline', label: 'API 未配置' }
+    : healthStatus === 'ok'
+      ? { className: 'online', label: 'API 有效' }
+      : healthStatus === 'failed'
+        ? { className: 'failed', label: 'API 无效' }
+        : healthStatus === 'checking'
+          ? { className: 'checking', label: '检测中' }
+          : { className: 'unknown', label: 'API 未检测' }
 
   useEffect(() => {
     try {
@@ -347,6 +358,20 @@ export default function App() {
   useEffect(() => {
     chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' })
   }, [activeProject?.messages, isLoading])
+
+  useEffect(() => {
+    if (!showMentions) return undefined
+
+    function closeMentionsOnOutsideClick(event) {
+      const target = event.target
+      if (mentionMenuRef.current?.contains(target) || inputRef.current?.contains(target)) return
+      setShowMentions(false)
+      setHoveredMentionId('')
+    }
+
+    document.addEventListener('pointerdown', closeMentionsOnOutsideClick, true)
+    return () => document.removeEventListener('pointerdown', closeMentionsOnOutsideClick, true)
+  }, [showMentions])
 
   function updateActiveProject(patch) {
     setProjects((current) =>
@@ -494,6 +519,26 @@ export default function App() {
     setHoveredMentionId('')
   }
 
+  function insertMentionTrigger() {
+    const cursorPosition = inputRef.current?.selectionStart ?? input.length
+    const selectionEnd = inputRef.current?.selectionEnd ?? cursorPosition
+
+    setInput((value) => {
+      const nextValue = `${value.slice(0, cursorPosition)}@${value.slice(selectionEnd)}`
+      requestAnimationFrame(() => {
+        const nextCursor = cursorPosition + 1
+        inputRef.current?.focus()
+        inputRef.current?.setSelectionRange(nextCursor, nextCursor)
+      })
+      return nextValue
+    })
+
+    setMentionStart(cursorPosition)
+    setMentionQuery('')
+    setHoveredMentionId(activeProject.images[0]?.id || '')
+    setShowMentions(activeProject.images.length > 0)
+  }
+
   async function copyText(text, label) {
     await navigator.clipboard.writeText(text)
     setCopyTip(label)
@@ -617,6 +662,7 @@ export default function App() {
   }
 
   const filteredProjects = projects.filter((project) => project.name.toLowerCase().includes(query.toLowerCase()))
+  const shouldScrollProjects = filteredProjects.length > 4
   const mentionMatches = activeProject.images.filter((image, index) => {
     const normalizedQuery = mentionQuery.trim().toLowerCase()
     if (!normalizedQuery) return true
@@ -631,14 +677,14 @@ export default function App() {
           <div className="brand">
             <div className="brand-mark">✦</div>
             <div>
-              <strong>TheONE studio</strong>
-              <span>AI Prompt App</span>
+              <strong>YF_AIGC Studio</strong>
+              <span>AI Prompt Project 提示词生成 —— 想你所想,答你所问</span>
             </div>
           </div>
           <nav className="top-actions" aria-label="顶部功能区">
             <button className="nav-pill active">视频运镜提示词</button>
-            <span className={`status-pill ${activeProvider.apiKey ? 'online' : 'offline'}`}>
-              {activeProvider.apiKey ? 'API ready' : 'API missing'}
+            <span className={`status-pill ${apiStatus.className}`} title="在 API 设置中点击检测联通可验证有效性">
+              {apiStatus.label}
             </span>
             <span className="model-pill">{activeProvider.model || '未选择模型'}</span>
             <button className="nav-pill" onClick={() => setShowSettings(true)}>API 设置</button>
@@ -647,43 +693,70 @@ export default function App() {
         </div>
       </header>
 
-      <main className="workspace-shell">
-        <aside className="left-panel panel">
-          <button className="primary-button" onClick={addProject}>
-            <FaPlus /> 新增项目
-          </button>
-          <label className="search-box">
-            <FaSearch />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目" />
-          </label>
-          <div className="section-label">PROJECTS</div>
-          <div className="project-list">
-            {filteredProjects.map((project) => (
-              <article
-                className={`project-card ${project.id === activeProject.id ? 'active' : ''}`}
-                key={project.id}
-                onClick={() => setActiveId(project.id)}
-              >
-                <input
-                  className="project-name"
-                  value={project.name}
-                  onChange={(event) => {
-                    const name = event.target.value
-                    setProjects((current) => current.map((item) => (item.id === project.id ? { ...item, name } : item)))
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                />
-                <time>{project.createdAt}</time>
-                <div className="card-actions">
-                  <button onClick={() => setActiveId(project.id)}>打开</button>
-                  <button className="ghost-danger" onClick={(event) => { event.stopPropagation(); deleteProject(project.id) }}>
-                    删除
-                  </button>
-                </div>
-              </article>
-            ))}
+      <main className={`workspace-shell ${projectPanelCollapsed ? 'project-panel-collapsed' : ''}`}>
+        <aside className={`left-panel panel ${projectPanelCollapsed ? 'collapsed' : ''}`}>
+          <div className="left-panel-toolbar">
+            {!projectPanelCollapsed && <div className="left-footer">视频运镜提示词</div>}
+            <button
+              className="project-collapse-toggle"
+              onClick={() => setProjectPanelCollapsed((value) => !value)}
+              aria-label={projectPanelCollapsed ? '展开项目栏' : '折叠项目栏'}
+              aria-expanded={!projectPanelCollapsed}
+              title={projectPanelCollapsed ? '展开项目栏' : '折叠项目栏'}
+            >
+              {projectPanelCollapsed ? <FaChevronRight /> : <FaChevronLeft />}
+            </button>
           </div>
-          <div className="left-footer">视频运镜提示词</div>
+          {!projectPanelCollapsed && (
+            <div className="project-panel-content">
+              <button className="primary-button" onClick={addProject}>
+                <FaPlus /> 新增项目
+              </button>
+              <label className="search-box">
+                <FaSearch />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索项目" />
+              </label>
+              <div className="section-label">PROJECTS</div>
+              <div className={`project-list ${shouldScrollProjects ? 'scrollable' : ''}`}>
+                {filteredProjects.map((project) => (
+                  <article
+                    className={`project-card ${project.id === activeProject.id ? 'active' : ''}`}
+                    key={project.id}
+                    onClick={() => setActiveId(project.id)}
+                  >
+                    <input
+                      className="project-name"
+                      value={project.name}
+                      onChange={(event) => {
+                        const name = event.target.value
+                        setProjects((current) => current.map((item) => (item.id === project.id ? { ...item, name } : item)))
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                      title={project.name}
+                    />
+                    <div className="project-card-body">
+                      <div className="project-thumb-wrap">
+                        {project.images?.[0] ? (
+                          <img className="project-thumb" src={project.images[0].dataUrl} alt={project.images[0].name || project.name} />
+                        ) : (
+                          <div className="project-thumb project-thumb-placeholder">暂无图</div>
+                        )}
+                      </div>
+                      <div className="project-meta">
+                        <time>{project.createdAt}</time>
+                        <div className="card-actions">
+                          <button onClick={() => setActiveId(project.id)}>打开</button>
+                          <button className="ghost-danger" onClick={(event) => { event.stopPropagation(); deleteProject(project.id) }}>
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
         </aside>
 
         <section className="center-panel panel">
@@ -700,6 +773,8 @@ export default function App() {
             </div>
           </header>
 
+          <div className="center-workspace">
+            <div className="asset-column">
           <section className="storyboard-templates">
             <div className="template-head">
               <div>
@@ -722,41 +797,10 @@ export default function App() {
             </div>
           </section>
 
-          <section
-            className="upload-zone"
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files) }}
-          >
-            <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => addFiles(event.target.files)} />
-            <div className="upload-head">
-              <div>
-                <strong>已添加参考图</strong>
-                <span>最多 10 张，每张不超过 10MB。当前 {activeProject.images.length}/{MAX_IMAGES}</span>
-              </div>
-              <button type="button" onClick={(event) => { event.stopPropagation(); fileInputRef.current?.click() }}>继续添加</button>
-            </div>
-            <div className="thumb-list">
-              {activeProject.images.length === 0 && <div className="empty-upload"><FaImage /> 点击、拖拽或粘贴图片</div>}
-              {activeProject.images.map((image, index) => (
-                <figure className="thumb-card" key={image.id}>
-                  <img src={image.dataUrl} alt={image.name} />
-                  <figcaption>
-                    <b>@图{index + 1}</b>
-                    <span>{image.name}</span>
-                    <small>{formatSize(image.size)}</small>
-                  </figcaption>
-                  <button onClick={(event) => { event.stopPropagation(); deleteImage(image.id) }} title="删除图片">
-                    <FaRegTrashAlt />
-                  </button>
-                </figure>
-              ))}
-            </div>
-          </section>
-
           {!activeProvider.apiKey && <div className="api-warning">请先在右上角 API 设置中填写当前模型的 API Key。</div>}
-          {uploadWarning && <div className="upload-warning">{uploadWarning}</div>}
+            </div>
 
+            <div className="conversation-column">
           <section className="chat-box" ref={chatRef}>
             {activeProject.messages.map((message) => (
               <div className={`message ${message.role.replace(' ', '-')}`} key={message.id}>
@@ -767,36 +811,104 @@ export default function App() {
             {isLoading && <div className="message assistant typing"><span>AI ASSISTANT</span><p>正在生成需求总结与最终提示词...</p></div>}
           </section>
 
-          <section className="composer">
-            <div className="preset-line">
-              <span>预设</span>
-              <button onClick={() => setInput('请在运镜提示词中使用 @图1、@图2 这类标记，对应说明每张参考图的画面/镜头用途。')}>
-                参考图标记 @图1
-              </button>
+          <section
+            className="composer"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files) }}
+          >
+            <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => addFiles(event.target.files)} />
+            <div className="composer-input-shell">
+              <div className="attachment-rail">
+                {activeProject.images.length > 0 ? (
+                  <div className="attachment-stack" title="已添加参考图">
+                    {activeProject.images.slice(0, 3).map((image, index) => (
+                      <img
+                        className="stack-preview"
+                        key={image.id}
+                        src={image.dataUrl}
+                        alt={image.name}
+                        style={{ '--stack-index': index }}
+                      />
+                    ))}
+                    <button className="attachment-add-button" type="button" onClick={() => fileInputRef.current?.click()} title="继续添加参考图">
+                      <FaPlus />
+                    </button>
+                    <div className="attachment-popover" aria-label="已上传参考图">
+                      <div className="attachment-popover-title">
+                        <strong>已上传参考图</strong>
+                        <span>{activeProject.images.length}/{MAX_IMAGES}</span>
+                      </div>
+                      <div className="attachment-popover-list">
+                        {activeProject.images.map((image, index) => (
+                          <figure
+                            className="attachment-popover-card"
+                            key={image.id}
+                            style={{ '--fan-index': index }}
+                          >
+                            <img src={image.dataUrl} alt={image.name} />
+                            <figcaption>@图{index + 1}</figcaption>
+                            <button
+                              type="button"
+                              onClick={(event) => { event.stopPropagation(); deleteImage(image.id) }}
+                              title={`删除 @图${index + 1}`}
+                            >
+                              ×
+                            </button>
+                          </figure>
+                        ))}
+                        <button
+                          className="attachment-popover-add"
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={activeProject.images.length >= MAX_IMAGES}
+                          title="继续添加参考图"
+                        >
+                          <FaPlus />
+                          <span>继续添加</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button type="button" className="attachment-empty" onClick={() => fileInputRef.current?.click()}>
+                    <FaImage />
+                    <span>添加参考图</span>
+                  </button>
+                )}
+              </div>
+              <div className="composer-main">
+                <div className="preset-line">
+                  <span>使用 <b>@</b> 快速调用参考内容</span>
+                  <button type="button" onClick={insertMentionTrigger}>
+                    参考图标记 @图1
+                  </button>
+                </div>
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  disabled={isLoading}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setInput(value)
+                    updateMentionState(value, event.target.selectionStart)
+                  }}
+                  onClick={(event) => updateMentionState(event.currentTarget.value, event.currentTarget.selectionStart)}
+                  onKeyUp={(event) => {
+                    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+                      updateMentionState(event.currentTarget.value, event.currentTarget.selectionStart)
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setShowMentions(false)
+                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage()
+                  }}
+                  placeholder="例如：@图1 模仿画面构图，@图2 参考主体动作，然后描述你希望生成的运镜方向。"
+                />
+              </div>
             </div>
-            <textarea
-              ref={inputRef}
-              value={input}
-              disabled={isLoading}
-              onChange={(event) => {
-                const value = event.target.value
-                setInput(value)
-                updateMentionState(value, event.target.selectionStart)
-              }}
-              onClick={(event) => updateMentionState(event.currentTarget.value, event.currentTarget.selectionStart)}
-              onKeyUp={(event) => {
-                if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
-                  updateMentionState(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') setShowMentions(false)
-                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage()
-              }}
-              placeholder="请在运镜提示词中使用 @图1、@图2 这类标记，对应说明每张参考图的画面/镜头用途。"
-            />
+            {uploadWarning && <div className="upload-warning composer-warning">{uploadWarning}</div>}
             {showMentions && activeProject.images.length > 0 && (
-              <div className="mention-menu">
+              <div className="mention-menu" ref={mentionMenuRef}>
                 {mentionMatches.length === 0 && <div className="mention-empty">没有匹配的参考图</div>}
                 {mentionMatches.map((image) => {
                   const index = activeProject.images.findIndex((item) => item.id === image.id)
@@ -808,7 +920,8 @@ export default function App() {
                     onFocus={() => setHoveredMentionId(image.id)}
                     onClick={() => insertMention(index)}
                   >
-                    @图{index + 1} <span>{image.name}</span>
+                    <strong>@图{index + 1}</strong>
+                    <span title={image.name}>{image.name}</span>
                   </button>
                   )
                 })}
@@ -830,6 +943,8 @@ export default function App() {
               </button>
             </div>
           </section>
+            </div>
+          </div>
         </section>
 
         <aside className="right-panel panel">
@@ -837,11 +952,6 @@ export default function App() {
             <h2>生成结果</h2>
             <p>中英文分别复制 + 历史记录点击查看</p>
           </header>
-          <input
-            className="result-title"
-            value={activeProject.result.title}
-            onChange={(event) => updateActiveProject((project) => ({ result: { ...project.result, title: event.target.value } }))}
-          />
           <PromptBlock title="中文 Prompt" button="复制中文" value={activeProject.result.cn} onCopy={() => copyText(activeProject.result.cn, '复制中文成功')} />
           <PromptBlock title="English Prompt" button="Copy English" value={activeProject.result.en} onCopy={() => copyText(activeProject.result.en, 'Copy English success')} />
           {copyTip && <div className="copy-tip">{copyTip}</div>}
