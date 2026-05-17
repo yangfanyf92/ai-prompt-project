@@ -446,16 +446,27 @@ export default function App() {
     if (!files.length) return
     setUploadWarning('')
     const available = MAX_IMAGES - activeProject.images.length
+    const oversized = files.filter((file) => file.size > MAX_IMAGE_SIZE)
     const valid = files.filter((file) => file.size <= MAX_IMAGE_SIZE).slice(0, available)
     if (!valid.length) {
-      setUploadWarning('图片未添加：单张图片不能超过 10MB，且单项目最多 10 张。')
+      if (oversized.length) {
+        const names = oversized.slice(0, 2).map((file) => file.name).join('、')
+        const suffix = oversized.length > 2 ? ' 等图片' : ''
+        setUploadWarning(`上传失败：${names}${suffix} 超过 10MB，系统已拒绝上传。`)
+      } else {
+        setUploadWarning('图片未添加：单项目最多只能上传 10 张参考图。')
+      }
       return
     }
     try {
       const images = await Promise.all(valid.map(fileToImage))
       updateActiveProject((project) => ({ images: [...project.images, ...images] }))
-      if (valid.length < files.length) {
-        setUploadWarning('部分图片未添加：单张不能超过 10MB，且单项目最多 10 张。')
+      if (oversized.length) {
+        const names = oversized.slice(0, 2).map((file) => file.name).join('、')
+        const suffix = oversized.length > 2 ? ' 等图片' : ''
+        setUploadWarning(`部分图片未上传：${names}${suffix} 超过 10MB，已自动跳过。`)
+      } else if (valid.length < files.length) {
+        setUploadWarning('部分图片未添加：单项目最多只能上传 10 张参考图。')
       }
     } catch {
       setUploadWarning('图片读取失败，请换一张图片重试。')
