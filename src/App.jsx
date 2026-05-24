@@ -9,6 +9,7 @@ import {
   FaImages,
   FaImage,
   FaMagic,
+  FaArrowUp,
   FaPaperPlane,
   FaPlus,
   FaSearch,
@@ -136,6 +137,14 @@ const defaultEnPrompt =
 const assistantIntro =
   '告诉我你想保留什么、修改什么，我会先在这里总结你的需求与优化方向，右侧再展示最终提示词。'
 
+function createId() {
+  if (typeof globalThis !== 'undefined' && typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 function nowText() {
   return new Date().toLocaleString('zh-CN', { hour12: false })
 }
@@ -168,11 +177,11 @@ function createProviderConfig(providerId, previous = {}) {
 
 function createProject(index = 1) {
   return {
-    id: crypto.randomUUID(),
+    id: createId(),
     name: `运镜项目 ${index}`,
     createdAt: nowText(),
     images: [],
-    messages: [{ id: crypto.randomUUID(), role: 'assistant', content: assistantIntro }],
+    messages: [{ id: createId(), role: 'assistant', content: assistantIntro }],
     result: {
       title: '电影感运镜提示词',
       cn: defaultCnPrompt,
@@ -267,7 +276,7 @@ async function fileToImage(file) {
           context.drawImage(img, 0, 0, width, height)
           const compressedDataUrl = canvasToDataUrl(canvas, file.type)
           resolve({
-            id: crypto.randomUUID(),
+            id: createId(),
             name: file.name,
             size: dataUrlBytes(compressedDataUrl),
             originalSize: file.size,
@@ -276,7 +285,7 @@ async function fileToImage(file) {
           })
         } catch {
           resolve({
-            id: crypto.randomUUID(),
+            id: createId(),
             name: file.name,
             size: file.size,
             originalSize: file.size,
@@ -287,7 +296,7 @@ async function fileToImage(file) {
       }
       img.onerror = () =>
         resolve({
-          id: crypto.randomUUID(),
+          id: createId(),
           name: file.name,
           size: file.size,
           originalSize: file.size,
@@ -351,14 +360,18 @@ export default function App() {
   const [mentionStart, setMentionStart] = useState(-1)
   const [mentionQuery, setMentionQuery] = useState('')
   const [hoveredMentionId, setHoveredMentionId] = useState('')
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
   const [notesOpen, setNotesOpen] = useState(true)
   const [uploadWarning, setUploadWarning] = useState('')
   const [storyboardTemplate, setStoryboardTemplate] = useState('default')
   const [projectPanelCollapsed, setProjectPanelCollapsed] = useState(false)
+  const [historyVisibleCount, setHistoryVisibleCount] = useState(5)
+  const [copiedHistoryAction, setCopiedHistoryAction] = useState('')
   const fileInputRef = useRef(null)
   const chatRef = useRef(null)
   const inputRef = useRef(null)
   const mentionMenuRef = useRef(null)
+  const historyCopyTimerRef = useRef(null)
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeId) || projects[0],
@@ -409,6 +422,10 @@ export default function App() {
     document.addEventListener('pointerdown', closeMentionsOnOutsideClick, true)
     return () => document.removeEventListener('pointerdown', closeMentionsOnOutsideClick, true)
   }, [showMentions])
+
+  useEffect(() => {
+    setHistoryVisibleCount(5)
+  }, [activeId])
 
   function updateActiveProject(patch) {
     setProjects((current) =>
@@ -519,7 +536,7 @@ export default function App() {
   function clearCurrent() {
     updateActiveProject(() => ({
       images: [],
-      messages: [{ id: crypto.randomUUID(), role: 'assistant', content: assistantIntro }],
+      messages: [{ id: createId(), role: 'assistant', content: assistantIntro }],
     }))
   }
 
@@ -531,6 +548,7 @@ export default function App() {
       setMentionStart(-1)
       setMentionQuery('')
       setHoveredMentionId('')
+      setActiveMentionIndex(0)
       return
     }
 
@@ -540,6 +558,7 @@ export default function App() {
       setMentionStart(-1)
       setMentionQuery('')
       setHoveredMentionId('')
+      setActiveMentionIndex(0)
       return
     }
 
@@ -565,6 +584,7 @@ export default function App() {
     setMentionStart(-1)
     setMentionQuery('')
     setHoveredMentionId('')
+    setActiveMentionIndex(0)
   }
 
   function insertMentionTrigger() {
@@ -584,13 +604,43 @@ export default function App() {
     setMentionStart(cursorPosition)
     setMentionQuery('')
     setHoveredMentionId(activeProject.images[0]?.id || '')
+    setActiveMentionIndex(0)
     setShowMentions(activeProject.images.length > 0)
   }
 
   async function copyText(text, label) {
-    await navigator.clipboard.writeText(text)
-    setCopyTip(label)
+    try {
+      if (window.isSecureContext && typeof navigator.clipboard?.writeText === 'function') {
+        await navigator.clipboard.writeText(text)
+      } else {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.setAttribute('readonly', '')
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        textarea.style.pointerEvents = 'none'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        textarea.setSelectionRange(0, textarea.value.length)
+        const copied = document.execCommand('copy')
+        document.body.removeChild(textarea)
+        if (!copied) throw new Error('copy failed')
+      }
+
+      setCopyTip(label)
+    } catch {
+      setCopyTip('复制失败，请手动复制')
+    }
+
     setTimeout(() => setCopyTip(''), 1600)
+  }
+
+  async function copyHistoryText(actionKey, text, label) {
+    await copyText(text, label)
+    setCopiedHistoryAction(actionKey)
+    if (historyCopyTimerRef.current) clearTimeout(historyCopyTimerRef.current)
+    historyCopyTimerRef.current = setTimeout(() => setCopiedHistoryAction(''), 5000)
   }
 
   async function checkHealth() {
@@ -677,17 +727,16 @@ export default function App() {
   async function sendMessage() {
     const text = input.trim()
     if (!text || isLoading) return
-    setInput('')
     setIsLoading(true)
 
-    const userMessage = { id: crypto.randomUUID(), role: 'user', content: text }
+    const userMessage = { id: createId(), role: 'user', content: text }
     updateActiveProject((project) => ({ messages: [...project.messages, userMessage] }))
 
     try {
       const generated = await callModel(text)
-      const aiMessage = { id: crypto.randomUUID(), role: 'assistant', content: generated.summary }
+      const aiMessage = { id: createId(), role: 'assistant', content: generated.summary }
       const historyItem = {
-        id: crypto.randomUUID(),
+        id: createId(),
         createdAt: nowText(),
         ...generated.result,
       }
@@ -701,7 +750,7 @@ export default function App() {
         messages: [
           ...project.messages,
           userMessage,
-          { id: crypto.randomUUID(), role: 'assistant error', content: 'API请求失败，请检查 Key、Base URL、模型名称或网络。' },
+          { id: createId(), role: 'assistant error', content: 'API请求失败，请检查 Key、Base URL、模型名称或网络。' },
         ],
       }))
     } finally {
@@ -718,9 +767,14 @@ export default function App() {
   })
   const hoveredMention = activeProject.images.find((image) => image.id === hoveredMentionId)
   const activeFeatureMeta = FEATURE_PAGES.find((item) => item.id === activeFeaturePage) || FEATURE_PAGES[0]
+  const visibleHistory = activeProject.history.slice(0, historyVisibleCount)
+  const historyHasOverflow = activeProject.history.length > 5
 
   return (
-    <div className={`app-page ${showSettings ? 'settings-open' : ''}`} onPaste={(event) => addFiles(event.clipboardData.files)}>
+    <div
+      className={`app-page ${showSettings ? 'settings-open' : ''} ${featureNavCollapsed ? 'feature-nav-collapsed' : ''}`}
+      onPaste={(event) => addFiles(event.clipboardData.files)}
+    >
       <header className="top-nav">
         <div className="topbar-inner">
           <div className="brand">
@@ -742,54 +796,64 @@ export default function App() {
         </div>
       </header>
 
-      <main className="app-shell">
-        <div className={`feature-layout-shell ${featureNavCollapsed ? 'feature-nav-collapsed' : ''}`}>
-          <aside className={`feature-nav panel ${featureNavCollapsed ? 'collapsed' : ''}`}>
-            <div className="feature-nav-head">
-              {!featureNavCollapsed && (
-                <div>
-                  <span>WORKSPACE</span>
-                  <strong>功能导航</strong>
-                </div>
-              )}
+      <aside className={`feature-nav panel ${featureNavCollapsed ? 'collapsed' : ''}`}>
+        <div className="feature-nav-head">
+          {!featureNavCollapsed && (
+            <div>
+              <span>WORKSPACE</span>
+              <strong>功能导航</strong>
+            </div>
+          )}
+          <button
+            className="feature-nav-toggle"
+            onClick={() => setFeatureNavCollapsed((value) => !value)}
+            aria-label={featureNavCollapsed ? '展开功能导航' : '折叠功能导航'}
+            aria-expanded={!featureNavCollapsed}
+            title={featureNavCollapsed ? '展开功能导航' : '折叠功能导航'}
+          >
+            {featureNavCollapsed ? <FaChevronRight /> : <FaChevronLeft />}
+          </button>
+        </div>
+
+        <div className="feature-nav-list">
+          {FEATURE_PAGES.map((item) => {
+            const Icon = item.icon
+            const isActive = item.id === activeFeaturePage
+            return (
               <button
-                className="feature-nav-toggle"
-                onClick={() => setFeatureNavCollapsed((value) => !value)}
-                aria-label={featureNavCollapsed ? '展开功能导航' : '折叠功能导航'}
-                aria-expanded={!featureNavCollapsed}
-                title={featureNavCollapsed ? '展开功能导航' : '折叠功能导航'}
+                key={item.id}
+                className={`feature-nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveFeaturePage(item.id)}
+                title={featureNavCollapsed ? item.label : undefined}
               >
-                {featureNavCollapsed ? <FaChevronRight /> : <FaChevronLeft />}
+                <span className="feature-nav-icon"><Icon /></span>
+                {!featureNavCollapsed && (
+                  <span className="feature-nav-copy">
+                    <strong>{item.label}</strong>
+                    <small>{item.description}</small>
+                  </span>
+                )}
+                {featureNavCollapsed && <span className="feature-nav-mini-label">{item.shortLabel}</span>}
               </button>
-            </div>
+            )
+          })}
+        </div>
 
-            <div className="feature-nav-list">
-              {FEATURE_PAGES.map((item) => {
-                const Icon = item.icon
-                const isActive = item.id === activeFeaturePage
-                return (
-                  <button
-                    key={item.id}
-                    className={`feature-nav-item ${isActive ? 'active' : ''}`}
-                    onClick={() => setActiveFeaturePage(item.id)}
-                    title={featureNavCollapsed ? item.label : undefined}
-                  >
-                    <span className="feature-nav-icon"><Icon /></span>
-                    {!featureNavCollapsed && (
-                      <span className="feature-nav-copy">
-                        <strong>{item.label}</strong>
-                        <small>{item.description}</small>
-                      </span>
-                    )}
-                    {featureNavCollapsed && <span className="feature-nav-mini-label">{item.shortLabel}</span>}
-                  </button>
-                )
-              })}
-            </div>
-          </aside>
+        <button
+          type="button"
+          className="feature-nav-top-button"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="回到顶部"
+          title="回到顶部"
+        >
+          <FaArrowUp />
+        </button>
+      </aside>
 
-          <div className="page-stage">
+      <main className="app-shell">
+        <div className="page-stage">
           {activeFeaturePage === 'cameraPrompts' ? (
+            <>
             <div className={`workspace-shell ${projectPanelCollapsed ? 'project-panel-collapsed' : ''}`}>
               <aside className={`left-panel panel ${projectPanelCollapsed ? 'collapsed' : ''}`}>
                 <div className="left-panel-toolbar">
@@ -997,6 +1061,25 @@ export default function App() {
                             }}
                             onKeyDown={(event) => {
                               if (event.key === 'Escape') setShowMentions(false)
+                              if (showMentions && mentionMatches.length > 0 && event.key === 'ArrowDown') {
+                                event.preventDefault()
+                                const nextIndex = (activeMentionIndex + 1) % mentionMatches.length
+                                setActiveMentionIndex(nextIndex)
+                                setHoveredMentionId(mentionMatches[nextIndex].id)
+                              }
+                              if (showMentions && mentionMatches.length > 0 && event.key === 'ArrowUp') {
+                                event.preventDefault()
+                                const nextIndex = (activeMentionIndex - 1 + mentionMatches.length) % mentionMatches.length
+                                setActiveMentionIndex(nextIndex)
+                                setHoveredMentionId(mentionMatches[nextIndex].id)
+                              }
+                              if (showMentions && mentionMatches.length > 0 && event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
+                                event.preventDefault()
+                                const image = mentionMatches[activeMentionIndex]
+                                const index = activeProject.images.findIndex((item) => item.id === image.id)
+                                if (index >= 0) insertMention(index)
+                                return
+                              }
                               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) sendMessage()
                             }}
                             placeholder="例如：C图1 模仿画面构图，A图2 参考主体动作，然后描述你希望生成的运镜方向。"
@@ -1007,14 +1090,21 @@ export default function App() {
                       {showMentions && activeProject.images.length > 0 && (
                         <div className="mention-menu" ref={mentionMenuRef}>
                           {mentionMatches.length === 0 && <div className="mention-empty">没有匹配的参考图</div>}
-                          {mentionMatches.map((image) => {
+                          {mentionMatches.map((image, matchIndex) => {
                             const index = activeProject.images.findIndex((item) => item.id === image.id)
                             return (
                               <button
                                 key={image.id}
+                                className={matchIndex === activeMentionIndex ? 'active' : ''}
                                 onMouseDown={(event) => event.preventDefault()}
-                                onMouseEnter={() => setHoveredMentionId(image.id)}
-                                onFocus={() => setHoveredMentionId(image.id)}
+                                onMouseEnter={() => {
+                                  setHoveredMentionId(image.id)
+                                  setActiveMentionIndex(matchIndex)
+                                }}
+                                onFocus={() => {
+                                  setHoveredMentionId(image.id)
+                                  setActiveMentionIndex(matchIndex)
+                                }}
                                 onClick={() => insertMention(index)}
                               >
                                 <strong>@图{index + 1}</strong>
@@ -1049,8 +1139,8 @@ export default function App() {
                   <h2>生成结果</h2>
                   <p>中英文分别复制 + 历史记录点击查看</p>
                 </header>
-                <PromptBlock title="中文 Prompt" button="复制中文" value={activeProject.result.cn} onCopy={() => copyText(activeProject.result.cn, '复制中文成功')} />
-                <PromptBlock title="English Prompt" button="Copy English" value={activeProject.result.en} onCopy={() => copyText(activeProject.result.en, 'Copy English success')} />
+                <PromptBlock title="中文 Prompt" button="复制中文" value={activeProject.result.cn} buttonClassName={copiedHistoryAction === 'right-cn' ? 'copied' : ''} buttonLabel={copiedHistoryAction === 'right-cn' ? '已复制' : '复制中文'} onCopy={() => copyHistoryText('right-cn', activeProject.result.cn, '复制中文成功')} />
+                <PromptBlock title="English Prompt" button="Copy English" value={activeProject.result.en} buttonClassName={copiedHistoryAction === 'right-en' ? 'copied' : ''} buttonLabel={copiedHistoryAction === 'right-en' ? '已复制' : 'Copy English'} onCopy={() => copyHistoryText('right-en', activeProject.result.en, 'Copy English success')} />
                 {copyTip && <div className="copy-tip">{copyTip}</div>}
 
                 <section className="notes">
@@ -1063,27 +1153,68 @@ export default function App() {
                     </ul>
                   )}
                 </section>
-
-                <section className="history-box">
-                  <div className="history-head">
-                    <strong>历史结果</strong>
-                    <span>{activeProject.history.length} 条</span>
-                  </div>
-                  <div className="history-list">
-                    {activeProject.history.length === 0 && <p>暂无历史结果</p>}
-                    {activeProject.history.map((item) => (
-                      <button
-                        key={item.id}
-                        onClick={() => updateActiveProject(() => ({ result: { title: item.title, cn: item.cn, en: item.en, notes: item.notes } }))}
-                      >
-                        <strong>{item.title}</strong>
-                        <span>{item.createdAt}</span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
               </aside>
             </div>
+            <section className={`history-prompts panel ${historyHasOverflow ? 'is-scrollable' : ''}`}>
+              <header className="history-prompts-head">
+                <div>
+                  <span>HISTORY PROMPTS</span>
+                  <h2>历史提示词</h2>
+                  <p>展示完整的历史生成提示词信息</p>
+                </div>
+                <button type="button">作品信息</button>
+              </header>
+
+              {activeProject.history.length === 0 ? (
+                <div className="history-prompts-empty">暂无历史提示词</div>
+              ) : (
+                <>
+                <div
+                  className="history-prompts-list"
+                  onScroll={(event) => {
+                    if (!historyHasOverflow) return
+                    const target = event.currentTarget
+                    const nearBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 24
+                    if (nearBottom && historyVisibleCount < activeProject.history.length) {
+                      setHistoryVisibleCount((count) => Math.min(count + 5, activeProject.history.length))
+                    }
+                  }}
+                >
+                  {visibleHistory.map((item) => (
+                    <article className="history-prompt-card" key={item.id}>
+                      <div className="history-prompt-card-head">
+                        <strong>{item.title}</strong>
+                        <span>{item.createdAt}</span>
+                      </div>
+                      <p className="history-prompt-snippet">{item.cn}</p>
+                      <p
+                        className="history-prompt-snippet en"
+                        title={item.en}
+                      >
+                        {item.en.length > 200 ? `${item.en.slice(0, 200)}...` : item.en}
+                      </p>
+                      <div className="history-prompt-actions">
+                        <button className={copiedHistoryAction === `${item.id}-cn` ? 'copied' : ''} onClick={() => copyHistoryText(`${item.id}-cn`, item.cn, '复制中文成功')}>
+                          {copiedHistoryAction === `${item.id}-cn` ? '已复制' : '复制中文'}
+                        </button>
+                        <button className={copiedHistoryAction === `${item.id}-en` ? 'copied' : ''} onClick={() => copyHistoryText(`${item.id}-en`, item.en, 'Copy English success')}>
+                          {copiedHistoryAction === `${item.id}-en` ? '已复制' : '复制英文'}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                {historyVisibleCount < activeProject.history.length && (
+                  <div className="history-prompts-more">
+                    <button type="button" onClick={() => setHistoryVisibleCount((count) => count + 5)}>
+                      加载更多
+                    </button>
+                  </div>
+                )}
+                </>
+              )}
+            </section>
+            </>
           ) : (
             <section className="feature-placeholder panel">
               <div className="feature-placeholder-hero">
@@ -1108,7 +1239,6 @@ export default function App() {
               </div>
             </section>
           )}
-          </div>
         </div>
       </main>
       {showSettings && (
@@ -1202,15 +1332,16 @@ export default function App() {
   )
 }
 
-function PromptBlock({ title, button, value, onCopy }) {
+function PromptBlock({ title, button, value, onCopy, buttonClassName = '', buttonLabel }) {
   return (
     <section className="prompt-block">
       <div>
         <h3>{title}</h3>
-        <button onClick={onCopy}><FaCopy /> {button}</button>
+        <button className={buttonClassName} onClick={onCopy}><FaCopy /> {buttonLabel || button}</button>
       </div>
       <textarea value={value} readOnly />
     </section>
   )
 }
+
 
