@@ -540,7 +540,6 @@ export default function App() {
       cancelled = true
     }
   }, [])
-
   function updateActiveProject(patch) {
     setProjects((current) =>
       current.map((project) =>

@@ -2289,7 +2289,6 @@ h2 {
   .auth-code-row {
     grid-template-columns: 1fr;
   }
-
 }
 
 @media (max-width: 1380px) {
