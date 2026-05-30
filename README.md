@@ -76,3 +76,50 @@ npm run dev
 - `src/App.jsx`：主要应用逻辑和界面。
 - `src/main.jsx`：React 挂载入口。
 - `src/style.css`：全局样式。
+
+## 认证后端补充说明
+
+当前仓库已新增真实邮箱验证码认证后端，启动命令：
+
+```powershell
+npm run auth-server
+```
+
+默认认证地址：
+
+```text
+http://127.0.0.1:8787
+```
+
+前端需要配置：
+
+```text
+VITE_AUTH_BASE_URL=http://127.0.0.1:8787
+```
+
+后端需要配置以下环境变量后，邮箱验证码发送才会生效：
+
+```text
+AUTH_SERVER_PORT=8787
+AUTH_APP_ORIGIN=http://localhost:5173
+AUTH_SMTP_HOST=smtp.example.com
+AUTH_SMTP_PORT=465
+AUTH_SMTP_USER=no-reply@example.com
+AUTH_SMTP_PASS=你的邮箱授权码
+AUTH_SMTP_FROM=AI Prompt Project <no-reply@example.com>
+```
+
+认证接口包括：
+
+- `POST /api/auth/send-code`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+- `GET /api/auth/health`
+
+后端数据默认写入：
+
+```text
+server/data/auth.sqlite
+```
